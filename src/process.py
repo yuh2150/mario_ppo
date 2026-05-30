@@ -35,10 +35,10 @@ def eval(opt, global_model, num_states, num_actions):
         state, reward, done, info = env.step(action)
 
         # Uncomment following lines if you want to save model whenever level is completed
-        # if info["flag_get"]:
-        #     print("Finished")
-        #     torch.save(local_model.state_dict(),
-        #                "{}/ppo_super_mario_bros_{}_{}_{}".format(opt.saved_path, opt.world, opt.stage, curr_step))
+        if info["flag_get"]:
+            print("Finished")
+            torch.save(local_model.state_dict(),
+                       "{}/ppo_super_mario_bros_{}_{}_{}".format(opt.saved_path, opt.world, opt.stage, curr_step))
 
         if getattr(opt, "render_eval", False):
             env.render()

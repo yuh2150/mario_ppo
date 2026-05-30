@@ -1,12 +1,12 @@
 import gym_super_mario_bros
 import warnings
+import os
 from gym.spaces import Box
 from gym import Wrapper
 from nes_py.wrappers import JoypadSpace
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT, COMPLEX_MOVEMENT, RIGHT_ONLY
 import cv2
 import numpy as np
-import subprocess as sp
 import torch.multiprocessing as mp
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -15,24 +15,32 @@ warnings.filterwarnings("ignore", message=".*out of date.*")
 
 class Monitor:
     def __init__(self, width, height, saved_path):
-        self.pipe = None
-        self.command = ["ffmpeg", "-y", "-f", "rawvideo", "-vcodec", "rawvideo", "-s", "{}X{}".format(width, height),
-                        "-pix_fmt", "rgb24", "-r", "15", "-i", "-", "-an", "-vcodec", "mpeg4", saved_path]
-        try:
-            self.pipe = sp.Popen(self.command, stdin=sp.PIPE, stderr=sp.PIPE)
-        except FileNotFoundError:
-            pass
+        self.width = width
+        self.height = height
+        self.saved_path = saved_path
+        output_dir = os.path.dirname(saved_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        self.writer = cv2.VideoWriter(saved_path, fourcc, 15, (width, height))
+        if not self.writer.isOpened():
+            self.writer.release()
+            self.writer = None
+            print("Warning: Could not create video writer for {}".format(saved_path))
 
     def record(self, image_array):
-        if self.pipe is not None:
-            self.pipe.stdin.write(image_array.tobytes())
+        if self.writer is None:
+            return
+        frame = np.asarray(image_array, dtype=np.uint8)
+        if frame.shape[1] != self.width or frame.shape[0] != self.height:
+            frame = cv2.resize(frame, (self.width, self.height))
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        self.writer.write(frame)
 
     def close(self):
-        if self.pipe is None:
-            return
-        self.pipe.stdin.close()
-        self.pipe.wait()
-        self.pipe = None
+        if self.writer is not None:
+            self.writer.release()
+            self.writer = None
 
 
 def process_frame(frame):
