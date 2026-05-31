@@ -14,6 +14,7 @@ warnings.filterwarnings("ignore", message=".*out of date.*")
 
 
 class Monitor:
+    # Ghi frame gameplay ra file video.
     def __init__(self, width, height, saved_path):
         self.width = width
         self.height = height
@@ -44,6 +45,7 @@ class Monitor:
 
 
 def process_frame(frame):
+    # Chuyen anh RGB ve grayscale 84x84 cho model.
     if frame is not None:
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         frame = cv2.resize(frame, (84, 84))[None, :, :] / 255.
@@ -53,6 +55,7 @@ def process_frame(frame):
 
 
 class CustomReward(Wrapper):
+    # Wrapper xu ly frame va reward shaping cho Mario.
     def __init__(self, env=None, world=None, stage=None, monitor=None):
         super(CustomReward, self).__init__(env)
         self.observation_space = Box(low=0, high=255, shape=(1, 84, 84))
@@ -70,6 +73,8 @@ class CustomReward(Wrapper):
         if self.monitor:
             self.monitor.record(state)
         state = process_frame(state)
+
+        # Thuong theo diem so, phat khi chet, thuong khi cham co.
         reward += (info["score"] - self.curr_score) / 40.
         self.curr_score = info["score"]
         if done:
@@ -87,6 +92,7 @@ class CustomReward(Wrapper):
                     2114 < info["x_pos"] < 2440 and info["y_pos"] < 191) or info["x_pos"] < self.current_x - 500:
                 reward -= 50
                 done = True
+        # Xu ly rieng cac man co vung loi/de ket.
         if self.world == 4 and self.stage == 4:
             if (info["x_pos"] <= 1500 and info["y_pos"] < 127) or (
                     1588 <= info["x_pos"] < 2380 and info["y_pos"] >= 127):
@@ -108,6 +114,7 @@ class CustomReward(Wrapper):
 
 
 class CustomSkipFrame(Wrapper):
+    # Lap lai action nhieu frame va stack cac frame gan nhat.
     def __init__(self, env, skip=4):
         super(CustomSkipFrame, self).__init__(env)
         self.observation_space = Box(low=0, high=255, shape=(skip, 84, 84))
@@ -125,6 +132,8 @@ class CustomSkipFrame(Wrapper):
             if done:
                 self.reset()
                 return self.states[None, :, :, :].astype(np.float32), total_reward, done, info
+
+        # Max-pool hai frame cuoi de giam nhieu hinh anh.
         max_state = np.max(np.concatenate(last_states, 0), 0)
         self.states[:-1] = self.states[1:]
         self.states[-1] = max_state
@@ -140,6 +149,7 @@ class CustomSkipFrame(Wrapper):
 
 
 def create_train_env(world, stage, actions, output_path=None):
+    # Tao Mario env va boc cac wrapper can cho train/test.
     env_id = "SuperMarioBros-{}-{}-v0".format(world, stage)
     try:
         env = gym_super_mario_bros.make(env_id, disable_env_checker=True)
@@ -157,6 +167,7 @@ def create_train_env(world, stage, actions, output_path=None):
 
 
 def get_actions(action_type):
+    # Map ten action set sang danh sach action cua gym-super-mario-bros.
     if action_type == "right":
         return RIGHT_ONLY
     if action_type == "simple":
@@ -165,6 +176,7 @@ def get_actions(action_type):
 
 
 def run_env_worker(env_conn, world, stage, action_type, output_path):
+    # Worker env nhan lenh step/reset/close tu process train.
     actions = get_actions(action_type)
     env = create_train_env(world, stage, actions, output_path=output_path)
     try:
@@ -187,6 +199,7 @@ def run_env_worker(env_conn, world, stage, action_type, output_path):
 
 
 class MultipleEnvironments:
+    # Quan ly nhieu env chay song song bang multiprocessing.
     def __init__(self, world, stage, action_type, num_envs, output_path=None):
         self.agent_conns, self.env_conns = zip(*[mp.Pipe() for _ in range(num_envs)])
         actions = get_actions(action_type)
@@ -201,6 +214,7 @@ class MultipleEnvironments:
             env_conn.close()
 
     def close(self):
+        # Dong tat ca env worker.
         for agent_conn in self.agent_conns:
             try:
                 agent_conn.send(("close", None))

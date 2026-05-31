@@ -15,6 +15,7 @@ import shutil
 
 
 def get_args():
+    # Cac tham so train co the truyen tu command line.
     parser = argparse.ArgumentParser(
         """Implementation of model described in the paper: Proximal Policy Optimization Algorithms for Super Mario Bros""")
     parser.add_argument("--world", type=int, default=1)
@@ -43,10 +44,13 @@ def get_args():
 
 
 def train(opt):
+    # Co dinh seed de ket qua on dinh hon.
     if torch.cuda.is_available():
         torch.cuda.manual_seed(123)
     else:
         torch.manual_seed(123)
+
+    # Tao TensorBoard log va thu muc luu model.
     run_name = "world_{}_stage_{}_{}".format(opt.world, opt.stage, opt.action_type)
     run_log_path = os.path.join(opt.log_path, run_name)
     if opt.reset_log and os.path.isdir(run_log_path):
@@ -56,6 +60,8 @@ def train(opt):
     print("TensorBoard log path: {}".format(run_log_path))
     if not os.path.isdir(opt.saved_path):
         os.makedirs(opt.saved_path)
+
+    # Tao nhieu env song song va model PPO dung chung.
     mp = _mp.get_context("spawn")
     envs = MultipleEnvironments(opt.world, opt.stage, opt.action_type, opt.num_processes)
     model = PPO(envs.num_states, envs.num_actions)
@@ -68,6 +74,8 @@ def train(opt):
         process.daemon = True
         process.start()
     optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr)
+
+    # Reset env va lay state ban dau.
     [agent_conn.send(("reset", None)) for agent_conn in envs.agent_conns]
     curr_states = [agent_conn.recv() for agent_conn in envs.agent_conns]
     curr_states = torch.from_numpy(np.concatenate(curr_states, 0))
@@ -77,6 +85,7 @@ def train(opt):
     episode_rewards = np.zeros(opt.num_processes, dtype=np.float32)
     completed_episode_rewards = []
     while True:
+        # Luu checkpoint dinh ky.
         # if curr_episode % opt.save_interval == 0 and curr_episode > 0:
         #     torch.save(model.state_dict(),
         #                "{}/ppo_super_mario_bros_{}_{}".format(opt.saved_path, opt.world, opt.stage))
@@ -96,6 +105,8 @@ def train(opt):
         dones = []
         rollout_rewards = []
         completed_rewards_this_rollout = []
+
+        # Thu thap rollout tu cac env.
         for _ in range(opt.num_local_steps):
             states.append(curr_states)
             logits, value = model(curr_states)
@@ -104,6 +115,7 @@ def train(opt):
             old_m = Categorical(policy)
             action = old_m.sample()
             actions.append(action)
+            # Luu log-prob cu de tinh ratio PPO.
             old_log_policy = old_m.log_prob(action)
             old_log_policies.append(old_log_policy)
             if torch.cuda.is_available():
@@ -134,6 +146,7 @@ def train(opt):
             dones.append(done)
             curr_states = state
 
+        # Tinh GAE va return muc tieu cho critic.
         _, next_value, = model(curr_states)
         next_value = next_value.squeeze(1)
         old_log_policies = torch.cat(old_log_policies).detach()
@@ -156,6 +169,8 @@ def train(opt):
         entropy_losses = []
         kl_divs = []
         clip_fractions = []
+
+        # Cap nhat model bang mini-batch PPO.
         for i in range(opt.num_epochs):
             indice = torch.randperm(opt.num_local_steps * opt.num_processes)
             for j in range(opt.batch_size):
@@ -167,11 +182,13 @@ def train(opt):
                 new_m = Categorical(new_policy)
                 new_log_policy = new_m.log_prob(actions[batch_indices])
                 ratio = torch.exp(new_log_policy - old_log_policies[batch_indices])
+                # PPO-Clip: gioi han ratio de policy moi khong thay doi qua manh.
                 actor_loss = -torch.mean(torch.min(ratio * advantages[batch_indices],
                                                    torch.clamp(ratio, 1.0 - opt.epsilon, 1.0 + opt.epsilon) *
                                                    advantages[
                                                        batch_indices]))
                 # critic_loss = torch.mean((R[batch_indices] - value) ** 2) / 2
+                # Critic hoc return, entropy giup policy kham pha.
                 critic_loss = F.smooth_l1_loss(R[batch_indices], value.squeeze(1))
                 entropy_loss = torch.mean(new_m.entropy())
                 total_loss = actor_loss + critic_loss - opt.beta * entropy_loss
@@ -180,7 +197,7 @@ def train(opt):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
                 optimizer.step()
 
-                # Record metrics
+                # Luu metric de tinh trung binh sau moi episode.
                 total_losses.append(total_loss.item())
                 actor_losses.append(actor_loss.item())
                 critic_losses.append(critic_loss.item())
@@ -219,6 +236,7 @@ def train(opt):
             else 0.0
         )
 
+        # Ghi metric ra TensorBoard.
         writer.add_scalar("Loss/total", avg_total_loss, curr_episode)
         writer.add_scalar("Loss/actor", avg_actor_loss, curr_episode)
         writer.add_scalar("Loss/critic", avg_critic_loss, curr_episode)
@@ -247,6 +265,7 @@ def train(opt):
                 len(completed_episode_rewards),
             )
         )
+        # Dung train va luu checkpoint cuoi.
         if curr_episode >= opt.max_episodes:
             torch.save(
                 model.state_dict(),
@@ -256,6 +275,7 @@ def train(opt):
                 opt.saved_path, opt.world, opt.stage
             ))
             break
+    # Don dep process eval va env.
     if process is not None and process.is_alive():
         process.terminate()
         process.join()
